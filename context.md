@@ -42,7 +42,7 @@ Altium binaries (`.SchDoc`, `.PcbDoc`) cannot be parsed reliably as text — use
 ```
  3S LiPo (9.0–12.6 V) ─► XT60 (J6) ─► 2× PTC 2.5 A (F1‖F2) ─► +12 ─┬─ TVS SMBJ15A (D3)
                                                                    │
-                                     INA219 (U7, 0x40) measures ◄──┤ R15 = 10 mΩ shunt
+                                     INA219 (U7, 0x40) measures ◄──┤ R15 shunt (50 mΩ fitted, see §3)
                                                                    ▼
                                                                +12_LOAD
             ┌───────────────────────────┬──────────────────────────┼──────────────────────┐
@@ -69,7 +69,7 @@ Altium binaries (`.SchDoc`, `.PcbDoc`) cannot be parsed reliably as text — use
 | Rail | Source | Value | Calculation / note | Loads |
 |---|---|---|---|---|
 | +12 | Battery via F1‖F2 (2× MF-MSMF250/16X, 2.5 A hold each) | 9.0–12.6 V (3S) | D3 SMBJ15A TVS, C6 100 µF + C9 100 nF | INA219 VIN+ |
-| +12_LOAD | +12 through R15 = 0.01 Ω (2512) | ≈ +12 − I·0.01 | measured by INA219 | Motors (pin 1), U3, U6 |
+| +12_LOAD | +12 through R15 (2512). Schematic value 0.01 Ω; **the owner fits 0.05 Ω** (stated 2026-11-12) | ≈ +12 − I·0.05 (0.25 V drop, 1.25 W at 5 A) | measured by INA219 | Motors (pin 1), U3, U6 |
 | +5 | TPS5430 U6, R12 = 10 k, R13 + R14 = 3 k + 220 = 3.22 k | **5.01 V** | Vout = 1.221 × (1 + 10k/3.22k) | Motor encoders (pin 6), buzzer, SW1 pos. 3 |
 | +4 | TPS5430 U3, R7 = 10 k, R8 + R10 = 3.9 k + 510 = 4.41 k | **3.99 V** | Vout = 1.221 × (1 + 10k/4.41k) | J7 "BAT 1S" only |
 | POWER | SW1 MTS-103: pos.3 = +5, pos.2 = POWER (common), pos.1 = USB VBUS | 5 V | ON-OFF-ON switch: battery / off / USB | AMS1117 |
@@ -193,6 +193,13 @@ naming choice: swapping them just inverts the counting sign, so firmware must ha
   glitch filter ≈ 1 µs) — no GPIO interrupts.
 - Unknown: whether motor inputs have internal pull-ups to 5 V. Drive them push-pull 3.3 V
   (works on RemRC boards). Do not enable ESP32 internal pull-ups on these pins.
+- **Motor model (owner, 2026-11-12):** Nidec 24H, 12 V version, marked "24H404J110"
+  (reported as "24h404j110 ã060464d"). Maximum speed unknown — measure on the bench.
+- **Reference behaviour from RemRC's `esp32_cube_enc` firmware** (same motor family; not yet
+  verified on this board): 8-bit 20 kHz PWM written as `255 − |cmd|`; the measured wheel speed
+  (counts per 15 ms loop) is added to the command before output, i.e. the PWM input behaves as an
+  open-loop duty/voltage command and the speed term compensates back-EMF; DIR is switched at any
+  speed without stopping first; BRAKE is held HIGH while balancing and LOW otherwise.
 
 ### 5.3 Safe sequencing (mandatory)
 
@@ -251,9 +258,9 @@ Motor CHx (pin 7/8) ─ 1 kΩ ─┬─ CHx_P ─► 74LVC14 input (Schmitt, inv
 | Ref (sch / silk) | Part | Pins | Firmware notes |
 |---|---|---|---|
 | J6 / XT-60 | XT60PW-M | P = battery +, N = GND | — |
-| J8 / "IMU PCB" | 4-pin 2.54 mm header (schematic title "FPGA Connector") | 1 = SENS_TX (GPIO17), 2 = SENS_RX (GPIO16), 3 = GND, 4 = +3.3_MCU | External IMU board over **UART2**. Module type, baud rate and protocol are **unknown — ask the owner** |
-| J7 / "BAT 1S" | Molex 1.25 mm 2-pin | 1 = +4 V, 2 = GND | Supplies an external board that expects a 1S cell. No signals |
-| U7 | INA219AIDR | A0 = A1 = GND → **0x40**, VS = 3.3 V | VIN+ = +12, VIN− = +12_LOAD, shunt 0.01 Ω |
+| J8 / "IMU PCB" | 4-pin 2.54 mm header (schematic title "FPGA Connector") | 1 = SENS_TX (GPIO17), 2 = SENS_RX (GPIO16), 3 = GND, 4 = +3.3_MCU | External IMU board over **UART2** — see "IMU PCB" below. The IMU PCB's TX must reach J8 pin 2 |
+| J7 / "BAT 1S" | Molex 1.25 mm 2-pin | 1 = +4 V, 2 = GND | Powers the IMU PCB (owner, 2026-11-12). No signals |
+| U7 | INA219AIDR | A0 = A1 = GND → **0x40**, VS = 3.3 V | VIN+ = +12, VIN− = +12_LOAD, shunt R15 = 0.05 Ω as fitted (schematic shows 0.01 Ω) |
 | LS1 / BUZZER | AT-0927-TT-2-R passive buzzer from +5 V (R19 51 Ω, flyback SS14) | GPIO19 | Use LEDC tones; different patterns for boot, arm, warning, fault |
 | D1 | Red LED | GPIO2 | Status patterns (idle blink, armed solid, fault fast blink) |
 | D2 | Red LED | +3.3 V | Power indicator, not controllable |
@@ -263,11 +270,41 @@ Motor CHx (pin 7/8) ─ 1 kΩ ─┬─ CHx_P ─► 74LVC14 input (Schmitt, inv
 
 ### INA219 recommended configuration
 
+The shunt value must be a runtime parameter (default **50 mΩ**), because the fitted part differs
+from the schematic (0.01 Ω) and the BOM part number (CSNL2512FT1L00 = 1 mΩ).
+
 - Bus range 16 V (BRNG = 0) — 3S max 12.6 V fits.
-- PGA ÷2 (±80 mV shunt) → ±8 A full scale with 0.01 Ω.
-- Current_LSB = 0.25 mA → **CAL = trunc(0.04096 / (0.00025 × 0.01)) = 16384**; Power_LSB = 5 mW.
+- With 0.05 Ω: PGA ÷8 (±320 mV shunt) → ±6.4 A full scale (5 A fuse limit = 250 mV).
+- Firmware computes current from the shunt-voltage register (LSB 10 µV → 0.2 mA at 0.05 Ω) and
+  power as V × I, so the calibration register is not required. If it is used anyway:
+  Current_LSB = 0.2 mA → **CAL = trunc(0.04096 / (0.0002 × 0.05)) = 4096**; Power_LSB = 4 mW.
 - 12-bit, 8–16 sample averaging, continuous shunt + bus; read at 10–50 Hz in a low-priority task.
 - Bus voltage is measured at VIN− (= +12_LOAD) w.r.t. GND.
+
+### IMU PCB (owner's "DAKTNC_Nhom2" board) — facts from its firmware source
+
+The owner supplied the STM32CubeIDE project `DAKTNC_Nhom2_MX` (not part of this repository) and
+can modify and reflash it. Facts below were read from that source, not measured.
+
+- **MCU:** STM32F103C8T6 @ 72 MHz (no FPU). **Sensors:** 2× MPU6500/MPU9250 on SPI1/SPI2
+  (averaged, ±2000 °/s, ±8 g, 1 kHz, DLPF 41 Hz), QMC5883L magnetometer and its own INA219 on I²C.
+- **Link:** USART1 (PA9 TX, PA10 RX) through an ADuM1201ARZ isolator (guaranteed to 1 Mbps),
+  8N1, **57600 baud at power-up**.
+- **Power:** from J7 "BAT 1S" (+4 V). J8 pin 4 (+3.3 V) is assumed to supply the ESP32 side of the
+  isolator — not verified, the IMU PCB schematic was not provided.
+- **Estimator:** multiplicative EKF at 1 kHz (quaternion body→world + gyro bias). Body frame =
+  IMU1 axes: X right, Y up, Z out of the board. World = NWU. Euler order Z-Y-X.
+- **Frame v1 (current firmware), 16 bytes, little-endian:** `AA 55`, SEQ (u8), ROLL, PITCH, YAW
+  (int16, 0.01°), VOLTAGE (u16 mV), CURRENT (int16 mA), POWER (u16 mW), CRC-8 (poly 0x07,
+  init 0x00, over bytes 0–14). Voltage/current/power are the IMU PCB's own supply, not the pack.
+- **Rate:** one frame per EKF result when the UART is idle: 360 frames/s at 57600, 1000 frames/s
+  from 230400 upwards.
+- **Commands (ASCII, CR/LF terminated, case-insensitive):** a baud rate (`9600` … `921600`)
+  switches baud after the current frame + 20 ms of silence; `BURST` sends 1000 frames at
+  460800; `MAGCAL` runs a 20 s magnetometer calibration.
+- **Limitation for balancing:** frame v1 carries **no angular rates**, which the state-feedback
+  controller needs. A second frame type (quaternion + bias-corrected gyro) is proposed; record it
+  here once agreed and implemented.
 
 ---
 
@@ -304,16 +341,30 @@ Motor CHx (pin 7/8) ─ 1 kΩ ─┬─ CHx_P ─► 74LVC14 input (Schmitt, inv
 
 ---
 
-## 11. Open questions (firmware must ask the owner — do not guess)
+## 11. Owner decisions and remaining open questions
 
-1. What is on the **IMU PCB** (sensor model, e.g. MPU6050 / ICM-42688 / BNO08x / custom FPGA
-   board), UART baud rate, frame format, output rate, and is it orientation data or raw IMU?
-2. What does the **J7 "BAT 1S" (+4 V)** output power exactly?
-3. Framework preference: ESP-IDF (recommended) or Arduino-ESP32, both via PlatformIO?
-4. Mechanical data: cube edge length, total mass, wheel inertia (or wheel mass/diameter), wheel
-   and board orientation inside the cube (which motor spins about which axis), IMU mounting axes.
-5. Exact Nidec 24H model number (e.g. 24H404H…), rated voltage and max rpm.
-6. Wireless tuning wanted (Wi-Fi web dashboard / BLE) or USB only?
+Answered by the owner on 2026-11-12:
+
+1. **IMU PCB:** the owner's STM32F103 board with 2× MPU6500 and an on-board EKF, UART protocol as
+   described in §8 "IMU PCB". The owner can modify its firmware.
+2. **J7 "BAT 1S" (+4 V)** powers the IMU PCB.
+3. **Framework:** no preference from the owner → ESP-IDF 5.x via PlatformIO.
+4. **Mechanics:** no dimensions, masses or inertias are available. The IMU PCB sits on top of the
+   cube, as in RemRC's redesigned cube. Motor ↔ axis mapping, signs and the balance points must
+   therefore come from calibration, and controller gains from tuning.
+5. **Motor:** Nidec 24H404J110, 12 V version (§5.2). Maximum rpm unknown.
+6. **Wireless:** Bluetooth control is wanted — manual gain tuning, automatic gain tuning, sensor
+   calibration and calibration of the edge and vertex balance points. No OTA.
+7. **Shunt R15:** 0.05 Ω will be fitted; the value must stay configurable (§8).
+8. **Scope:** balancing on edges and on the vertex only — no jump-up. Fault/brake behaviour is
+   left to the firmware ("do what is best").
+
+Still open (do not guess — measure or ask):
+
+- Motor input behaviour: internal pull-ups, PWM/DIR semantics, coasting vs holding at PWM stop
+  with BRAKE HIGH, maximum speed (§5.2). To be characterised with the bench commands.
+- Exact IMU PCB mounting orientation and which motor spins about which axis (found by calibration).
+- Whether the board and cube are assembled, and bench results from §12.
 
 ## 12. Bench bring-up checklist (before any balancing)
 
