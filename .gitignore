@@ -34,3 +34,6 @@ desktop.ini
 .DS_Store
 *.swp
 .claude/settings.local.json
+
+# ---------- Source archive (never commit) ----------
+/CubliV2-GitHub.rar
