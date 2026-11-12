@@ -1,0 +1,4 @@
+Layer Pairs Export File for PCB: C:\Users\Public\Documents\Altium\Projects\CubliV2\CubliV2PCB.PcbDoc
+LayersSetName=Top_Bot_Thru_Holes|DrillFile=cubliv2pcb-roundholes.txt|DrillLayers=gtl,gbl
+LayersSetName=Top_Bot_Slot_Holes|DrillFile=cubliv2pcb-slotholes.txt|DrillLayers=gtl,gbl
+LayersSetName=Top_Bot_Rect_Holes|DrillFile=cubliv2pcb-rectholes.txt|DrillLayers=gtl,gbl

@@ -1,0 +1,36 @@
+# ---------- Altium Designer ----------
+__Previews/
+History/
+Project Logs for */
+Project Outputs for */
+*.SchDocPreview
+*.PcbDocPreview
+*.~*
+*.$$$*
+.~lock.*
+~$*
+*.bak
+*.tmp
+
+# ---------- PlatformIO / ESP-IDF ----------
+.pio/
+firmware/.pio/
+firmware/.vscode/.browse.c_cpp.db*
+firmware/.vscode/c_cpp_properties.json
+firmware/.vscode/launch.json
+firmware/.vscode/ipch
+build/
+managed_components/
+sdkconfig.old
+
+# ---------- Python tools ----------
+__pycache__/
+*.pyc
+.venv/
+
+# ---------- OS / editors / local ----------
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+.claude/settings.local.json

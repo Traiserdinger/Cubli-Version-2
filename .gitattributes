@@ -1,0 +1,41 @@
+* text=auto
+
+# text, Windows line endings (Altium / Windows scripts)
+*.PrjPcb           text eol=crlf
+*.PrjPcbStructure  text eol=crlf
+*.OutJob           text eol=crlf
+*.LibPkg           text eol=crlf
+*.ps1              text eol=crlf
+*.bat              text eol=crlf
+*.cmd              text eol=crlf
+
+# text, Unix line endings
+*.md    text eol=lf
+*.c     text eol=lf
+*.cpp   text eol=lf
+*.h     text eol=lf
+*.hpp   text eol=lf
+*.py    text eol=lf
+*.ini   text eol=lf
+*.csv   text eol=lf
+
+# Altium binaries / 3D / office / archives
+*.SchDoc   binary
+*.PcbDoc   binary
+*.SchLib   binary
+*.PcbLib   binary
+*.IntLib   binary
+*.Cam      binary
+*.step     binary
+*.stp      binary
+*.lia      binary
+*.pdf      binary
+*.png      binary
+*.jpg      binary
+*.xlsx     binary
+*.zip      binary
+*.Zip      binary
+*.rar      binary
+
+# keep fabrication files byte-identical
+manufacturing/** -text

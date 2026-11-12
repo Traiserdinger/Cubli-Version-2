@@ -1,0 +1,14 @@
+Output: NC Drill Files
+Type  : NC Drill
+From  : Project [CubliV2.PrjPcb]
+   Generated File[CubliV2PCB-RoundHoles.TXT]
+   Generated File[CubliV2PCB-SlotHoles.TXT]
+   Generated File[CubliV2PCB-RectHoles.TXT]
+   Generated File[CubliV2PCB.LDP]
+   Generated File[CubliV2PCB.DRR]
+
+
+Files Generated   : 5
+Documents Printed : 0
+
+Finished Output Generation At 11:12:06 CH On 25/10/2026
