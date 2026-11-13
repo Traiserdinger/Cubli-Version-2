@@ -37,3 +37,7 @@ desktop.ini
 
 # ---------- Source archive (never commit) ----------
 /CubliV2-GitHub.rar
+
+# ---------- ESP-IDF generated config (source of truth: firmware/sdkconfig.defaults) ----------
+firmware/sdkconfig.*
+!firmware/sdkconfig.defaults

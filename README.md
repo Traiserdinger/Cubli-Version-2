@@ -27,7 +27,7 @@ monitoring and encoder signal conditioning.
   1S-powered sensor board.
 - **AMS1117-3.3** logic rail with a 3-position switch: battery / off / USB, so the firmware can be
   developed over USB with no battery attached.
-- **INA219** high-side power monitor (10 mΩ shunt) on the whole battery path: pack voltage, current
+- **INA219** high-side power monitor (50 mΩ shunt, configurable in firmware) on the whole battery path: pack voltage, current
   and power for low-voltage cut-off and over-current protection.
 - **Input protection:** two parallel 2.5 A resettable PTC fuses and an SMBJ15A TVS diode.
 - **74LVC14 Schmitt-trigger buffering** with RC filtering on all six encoder channels.
@@ -39,7 +39,7 @@ monitoring and encoder signal conditioning.
 ```mermaid
 flowchart LR
     BAT[3S LiPo<br/>9.0-12.6 V] --> XT60 --> FUSE[2x PTC 2.5 A<br/>+ TVS SMBJ15A]
-    FUSE --> SHUNT[10 mΩ shunt<br/>INA219]
+    FUSE --> SHUNT[50 mΩ shunt<br/>INA219]
     SHUNT --> LOAD[+12_LOAD]
     LOAD --> M[3x Nidec 24H]
     LOAD --> B5[TPS5430<br/>5 V]
