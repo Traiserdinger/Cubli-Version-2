@@ -41,3 +41,4 @@ desktop.ini
 # ---------- ESP-IDF generated config (source of truth: firmware/sdkconfig.defaults) ----------
 firmware/sdkconfig.*
 !firmware/sdkconfig.defaults
+/CubliV2-firmware.zip
