@@ -16,7 +16,7 @@ monitoring and encoder signal conditioning.
 | **MCU** | ESP32-WROOM-32E (4 MB) |
 | **Motors** | 3× Nidec 24H BLDC with integrated driver and 100-line encoder |
 | **Battery** | 3S LiPo (9.0–12.6 V) via XT60 |
-| **Author** | Tuan — Industrial University of Ho Chi Minh City (IUH) |
+| **Author** | Nguyễn Đức Trung — Industrial University of Ho Chi Minh City (IUH) |
 
 ---
 

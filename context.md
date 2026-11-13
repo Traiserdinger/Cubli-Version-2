@@ -6,7 +6,7 @@
 > this file wins; if this file and the schematic PDF disagree, **stop and ask the owner**.
 
 - **Repository:** https://github.com/Traiserdinger/CubliV2
-- **Owner:** Tuan (IUH — Industrial University of Ho Chi Minh City)
+- **Owner:** Nguyễn Đức Trung (IUH — Industrial University of Ho Chi Minh City)
 - **Project:** self-balancing reaction-wheel cube ("Cubli"), inspired by RemRC's ESP32 Cubli,
   redesigned PCB with better power, protection, sensing and signal conditioning.
 - **Firmware location:** `firmware/` (PlatformIO, ESP-IDF 5.5.3) — see `firmware/README.md`.
