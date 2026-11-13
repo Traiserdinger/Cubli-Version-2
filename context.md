@@ -5,7 +5,7 @@
 > (`hardware/CubliV2PCB.PcbDoc`). Firmware must follow this file. If code and this file disagree,
 > this file wins; if this file and the schematic PDF disagree, **stop and ask the owner**.
 
-- **Repository:** https://github.com/Traiserdinger/CubliV2
+- **Repository:** https://github.com/Traiserdinger/Cubli-Version-2
 - **Owner:** Nguyễn Đức Trung (IUH — Industrial University of Ho Chi Minh City)
 - **Project:** self-balancing reaction-wheel cube ("Cubli"), inspired by RemRC's ESP32 Cubli,
   redesigned PCB with better power, protection, sensing and signal conditioning.
