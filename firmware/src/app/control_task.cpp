@@ -150,6 +150,7 @@ private:
     int64_t phase_start_us_ = 0;
     int32_t phase_count_[6] = {0, 0, 0, 0, 0, 0};
     float wiretest_speed_ = 0;
+    bool brake_test_ = false;  // wiretest last phase: PWM commanded while BRAKE is LOW
     cubli::AxisCalibrator axis_cal_;
     bool drop_pending_ = false;
     int rec_div_ = 0;
@@ -409,6 +410,7 @@ void ControlLoop::enter_armed(SysState s) {
 void ControlLoop::compute_outputs(int64_t now_us, float dt, float u[3], bool& want_release) {
     for (int k = 0; k < 3; ++k) u[k] = 0.0f;
     want_release = false;
+    brake_test_ = false;
     const SysState st = sup_.state();
     const float t_proc = static_cast<float>(now_us - proc_start_us_) * 1e-6f;
 
@@ -479,6 +481,7 @@ void ControlLoop::compute_outputs(int64_t now_us, float dt, float u[3], bool& wa
             static constexpr float kCmd[5] = {0.15f, 0.0f, -0.15f, 0.0f, 0.15f};
             u[k] = kCmd[proc_phase_];
             want_release = proc_phase_ < 4;  // last phase: braked
+            brake_test_ = proc_phase_ == 4;
             if (proc_phase_ == 0) wiretest_speed_ = wheel_speed_[k];
             if (tp >= kDur[proc_phase_]) {
                 phase_count_[proc_phase_ + 1] = enc_count_[k];
@@ -578,7 +581,11 @@ void ControlLoop::apply_outputs(const float u_in[3], bool want_release, float dt
             u[k] = 0.0f;
     }
 
-    if (!release) {
+    if (brake_test_ && !g_deadman_tripped.load() && sup_.state() == SysState::kBench) {
+        // Brake engaged first, then PWM: the wheel must not turn (checks the yellow wire).
+        motors_->set_brake_released(false);
+        for (int k = 0; k < 3; ++k) motors_->set(k, u_in[k], p_.dir_inv(k) > 0.5f);
+    } else if (!release) {
         motors_->stop_all();
         motors_->set_brake_released(false);
     } else if (!motors_->brake_released()) {
