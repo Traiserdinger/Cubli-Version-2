@@ -9,8 +9,9 @@
 - **Owner:** Tuan (IUH — Industrial University of Ho Chi Minh City)
 - **Project:** self-balancing reaction-wheel cube ("Cubli"), inspired by RemRC's ESP32 Cubli,
   redesigned PCB with better power, protection, sensing and signal conditioning.
-- **Firmware location:** `firmware/` (PlatformIO project — to be created).
-- **Status:** PCB designed (Altium Designer). Firmware: not started.
+- **Firmware location:** `firmware/` (PlatformIO, ESP-IDF 5.5.3) — see `firmware/README.md`.
+- **Status:** PCB designed (Altium Designer). Firmware: complete first version (builds, PC tests
+  and simulation pass), **not yet run on hardware**. IMU PCB patch for frame v2 in `imu_pcb/`.
 
 ---
 
@@ -303,8 +304,13 @@ can modify and reflash it. Facts below were read from that source, not measured.
   switches baud after the current frame + 20 ms of silence; `BURST` sends 1000 frames at
   460800; `MAGCAL` runs a 20 s magnetometer calibration.
 - **Limitation for balancing:** frame v1 carries **no angular rates**, which the state-feedback
-  controller needs. A second frame type (quaternion + bias-corrected gyro) is proposed; record it
-  here once agreed and implemented.
+  controller needs.
+- **Frame v2 (agreed with the owner 2026-11-12, implemented in `imu_pcb/`, not yet flashed):**
+  28 bytes, `AA 56`, SEQ, STATUS, quaternion (4× int16, 1/32767), bias-corrected gyro (3× int16,
+  1 mrad/s), accel (3× int16, 1/4096 g), sample time (u16 µs), CRC-16/CCITT-FALSE over bytes 0–25.
+  Enabled by the command `CUBLI` (switches to 460800 baud after the current frame + 20 ms),
+  disabled by `FRAME1`; `REINIT` restarts the EKF. The magnetometer is not fused in v2 mode
+  (motor magnets). The ESP32 sends `CUBLI` automatically when it sees frame v1.
 
 ---
 

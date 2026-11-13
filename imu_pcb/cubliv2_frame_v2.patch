@@ -1,0 +1,304 @@
+diff -u original/app_config.h patched/app_config.h
+--- original/app_config.h	2026-11-13 01:13:59.956757521 +0000
++++ patched/app_config.h	2026-11-13 01:14:43.911646570 +0000
+@@ -103,6 +103,14 @@
+ /** Sau khi BURST xong: 1 = tự quay về baudrate trước đó, 0 = ở lại baud cao. */
+ #define CFG_BURST_RETURN_TO_PREV_BAUD   1
+ 
++/** CubliV2: baudrate dùng cho frame v2 (lệnh "CUBLI"). 28 byte x 1000 frame/s
++ *  = 280 000 bps -> 460800 (dư 1.65 lần, vẫn trong giới hạn 1 Mbps của ADuM1201). */
++#define CFG_UART_CUBLI_BAUD             460800U
++
++/** CubliV2: 1 = khi chạy frame v2 KHÔNG dùng từ kế để sửa Yaw (nam châm motor
++ *  làm nhiễu từ trường; bộ điều khiển cân bằng không cần Yaw). */
++#define CFG_CUBLI_DISABLE_MAG           1
++
+ /** Khoảng lặng (ms) trước và sau mỗi lần đổi baudrate để phía FPGA kịp đổi theo. */
+ #define CFG_UART_GUARD_MS               20U
+ 
+diff -u original/app_main.c patched/app_main.c
+--- original/app_main.c	2026-11-13 01:13:59.953645005 +0000
++++ patched/app_main.c	2026-11-13 01:14:43.912829335 +0000
+@@ -94,6 +94,9 @@
+ static uint32_t s_reprobe_div;
+ static uint8_t  s_reprobe_turn;
+ 
++/* CubliV2: số lần loại phép đo gia tốc ở lần kiểm tra trước (bit STATUS). */
++static uint32_t s_accel_rejected_seen;
++
+ /* MAGCAL */
+ static struct {
+     bool     active;
+@@ -324,6 +327,8 @@
+         s_magcal.active   = true;
+         s_magcal.start_ms = BSP_Millis();
+         s_magcal.n        = 0U;
++    } else if (strcmp(line, "REINIT") == 0) {
++        app_ekf_restart();               /* CubliV2: học lại tư thế + bias gyro (phải đứng yên) */
+     }
+ }
+ 
+@@ -514,7 +519,12 @@
+     case 3:
+         if (s_mag_fresh) {
+             s_mag_fresh = false;
+-            (void)EKF_UpdateMag(&s_ekf, &s_mag_body);
++#if CFG_CUBLI_DISABLE_MAG
++            if (Comm_GetFrameMode() != COMM_FRAME_MODE_V2)
++#endif
++            {
++                (void)EKF_UpdateMag(&s_ekf, &s_mag_body);
++            }
+         }
+         break;
+     default:
+@@ -525,7 +535,40 @@
+     s_slot = (uint8_t)((s_slot + 1U) % APP_SLOT_COUNT);
+ 
+     /* 4. Nạp số liệu mới nhất cho frame. */
+-    if (Comm_TelemetryWanted()) {
++    if (Comm_TelemetryWanted() && (Comm_GetFrameMode() == COMM_FRAME_MODE_V2)) {
++        /* CubliV2 frame v2: quaternion + gyro đã trừ bias + gia tốc. */
++        comm_telemetry_v2_t t2;
++        uint8_t st = 0U;
++        if (s_ekf.initialized)  { st |= COMM_V2_STATUS_EKF_READY; }
++        if (s_imu1.present)     { st |= COMM_V2_STATUS_IMU1_OK; }
++        if (s_imu2.present)     { st |= COMM_V2_STATUS_IMU2_OK; }
++        if (s_drdy_alive)       { st |= COMM_V2_STATUS_DRDY_CLOCK; }
++        if (s_ekf.accel_rejected != s_accel_rejected_seen) {
++            s_accel_rejected_seen = s_ekf.accel_rejected;
++            st |= COMM_V2_STATUS_ACC_REJECT;
++        }
++#if !CFG_CUBLI_DISABLE_MAG
++        if (s_mag.present)      { st |= COMM_V2_STATUS_MAG_FUSED; }
++#endif
++        t2.status = st;
++        for (int i = 0; i < 4; i++) {
++            t2.q[i] = clamp_i16((int32_t)(s_ekf.q[i] * 32767.0f + ((s_ekf.q[i] >= 0.0f) ? 0.5f : -0.5f)));
++        }
++        if (fused.valid) {
++            const float g[3] = { fused.gyro_rads.x - s_ekf.bg[0], fused.gyro_rads.y - s_ekf.bg[1],
++                                 fused.gyro_rads.z - s_ekf.bg[2] };
++            const float a[3] = { fused.accel_g.x, fused.accel_g.y, fused.accel_g.z };
++            for (int i = 0; i < 3; i++) {
++                t2.gyro_mrads[i] = clamp_i16((int32_t)(g[i] * 1000.0f + ((g[i] >= 0.0f) ? 0.5f : -0.5f)));
++                t2.accel_4096[i] = clamp_i16((int32_t)(a[i] * 4096.0f + ((a[i] >= 0.0f) ? 0.5f : -0.5f)));
++            }
++        } else {
++            for (int i = 0; i < 3; i++) { t2.gyro_mrads[i] = 0; t2.accel_4096[i] = 0; }
++            t2.status = (uint8_t)(t2.status & ~COMM_V2_STATUS_EKF_READY);
++        }
++        t2.t_us = (uint16_t)(ts_us & 0xFFFFU);
++        Comm_UpdateTelemetryV2(&t2);
++    } else if (Comm_TelemetryWanted()) {
+         comm_telemetry_t t;
+         float roll = 0.0f, pitch = 0.0f, yaw = 0.0f;
+         if (s_ekf.initialized) {
+diff -u original/comm_protocol.c patched/comm_protocol.c
+--- original/comm_protocol.c	2026-11-13 01:13:59.949527215 +0000
++++ patched/comm_protocol.c	2026-11-13 01:14:43.912496046 +0000
+@@ -71,11 +71,15 @@
+     /* Số liệu đo: bộ đệm kép. Vòng lặp chính ghi vào ô không dùng rồi đổi chỉ
+      * số; ngắt chỉ đọc ô đang dùng -> luôn đọc được một bộ số liệu nhất quán. */
+     comm_telemetry_t telem[2];
++    comm_telemetry_v2_t telem2[2];       /* CubliV2: cùng cơ chế bộ đệm kép */
+     volatile uint8_t telem_idx;
++    volatile uint8_t telem2_idx;
+     volatile uint8_t telem_new;
++    volatile uint8_t frame_mode;         /* comm_frame_mode_t */
++    volatile uint8_t pending_mode;       /* 0 = không đổi */
+ 
+     /* Truyền */
+-    uint8_t          tx_frame[COMM_FRAME_SIZE];
++    uint8_t          tx_frame[COMM_FRAME_V2_SIZE];
+     volatile uint8_t tx_busy;
+     volatile uint8_t seq;
+     char             text_buf[COMM_TEXT_MAX];
+@@ -177,6 +181,31 @@
+     return true;
+ }
+ 
++uint16_t Comm_Crc16(const uint8_t *data, uint16_t len)
++{
++    uint16_t crc = 0xFFFFU;
++    for (uint16_t i = 0U; i < len; i++) {
++        crc ^= (uint16_t)((uint16_t)data[i] << 8);
++        for (uint8_t b = 0U; b < 8U; b++) {
++            crc = ((crc & 0x8000U) != 0U) ? (uint16_t)((crc << 1) ^ 0x1021U) : (uint16_t)(crc << 1);
++        }
++    }
++    return crc;
++}
++
++void Comm_PackFrameV2(uint8_t out[COMM_FRAME_V2_SIZE], uint8_t seq, const comm_telemetry_v2_t *t)
++{
++    out[0] = COMM_FRAME_HEADER0;
++    out[1] = COMM_FRAME_V2_HEADER1;
++    out[2] = seq;
++    out[3] = t->status;
++    for (uint8_t i = 0U; i < 4U; i++) { put_u16le(&out[4U + 2U * i], (uint16_t)t->q[i]); }
++    for (uint8_t i = 0U; i < 3U; i++) { put_u16le(&out[12U + 2U * i], (uint16_t)t->gyro_mrads[i]); }
++    for (uint8_t i = 0U; i < 3U; i++) { put_u16le(&out[18U + 2U * i], (uint16_t)t->accel_4096[i]); }
++    put_u16le(&out[24], t->t_us);
++    put_u16le(&out[26], Comm_Crc16(out, 26U));
++}
++
+ bool Comm_IsBaudSupported(uint32_t baud)
+ {
+     for (size_t i = 0U; i < (sizeof(k_baud_list) / sizeof(k_baud_list[0])); i++) {
+@@ -199,11 +228,17 @@
+  */
+ static bool comm_send_frame(void)
+ {
+-    const comm_telemetry_t *t = &s.telem[s.telem_idx];
+-    Comm_PackFrame(s.tx_frame, s.seq, t);
++    uint16_t len;
++    if (s.frame_mode == (uint8_t)COMM_FRAME_MODE_V2) {
++        Comm_PackFrameV2(s.tx_frame, s.seq, &s.telem2[s.telem2_idx]);
++        len = (uint16_t)COMM_FRAME_V2_SIZE;
++    } else {
++        Comm_PackFrame(s.tx_frame, s.seq, &s.telem[s.telem_idx]);
++        len = (uint16_t)COMM_FRAME_SIZE;
++    }
+ 
+     s.tx_busy = 1U;                      /* đặt trước: ngắt xong có thể đến ngay */
+-    if (!s.port.tx_start(s.tx_frame, (uint16_t)COMM_FRAME_SIZE)) {
++    if (!s.port.tx_start(s.tx_frame, len)) {
+         s.tx_busy = 0U;
+         return false;
+     }
+@@ -279,6 +314,15 @@
+             } else {
+                 s.stats.cmd_bad++;
+             }
++        } else if (strcmp(cmd, "CUBLI") == 0) {
++            /* CubliV2: frame v2 + baud cao, áp dụng cùng lúc ở bước DRAIN. */
++            s.pending_mode = (uint8_t)COMM_FRAME_MODE_V2;
++            s.pending_baud = (uint32_t)CFG_UART_CUBLI_BAUD;
++            s.stats.cmd_ok++;
++        } else if (strcmp(cmd, "FRAME1") == 0) {
++            s.pending_mode = (uint8_t)COMM_FRAME_MODE_V1;
++            s.pending_baud = (uint32_t)CFG_UART_DEFAULT_BAUD;
++            s.stats.cmd_ok++;
+         } else if (strcmp(cmd, "BURST") == 0) {
+             s.pending_burst = 1U;
+             s.stats.cmd_ok++;
+@@ -339,6 +383,20 @@
+     s.user_cb  = on_user_cmd;
+     s.cur_baud = initial_baud;
+     s.state    = (uint8_t)COMM_STATE_STREAM;
++    s.frame_mode = (uint8_t)COMM_FRAME_MODE_V1;
++}
++
++void Comm_UpdateTelemetryV2(const comm_telemetry_v2_t *t)
++{
++    uint8_t spare = (uint8_t)(1U - s.telem2_idx);
++    s.telem2[spare] = *t;
++    s.telem2_idx = spare;
++    s.telem_new = 1U;
++}
++
++comm_frame_mode_t Comm_GetFrameMode(void)
++{
++    return (comm_frame_mode_t)s.frame_mode;
+ }
+ 
+ void Comm_UpdateTelemetry(const comm_telemetry_t *t)
+@@ -418,6 +476,11 @@
+             if (s.pending_baud != 0UL) {
+                 uint32_t baud = s.pending_baud;
+                 s.pending_baud = 0UL;
++                if (s.pending_mode != 0U) {      /* CubliV2: đổi loại frame cùng lúc đổi baud */
++                    s.frame_mode = s.pending_mode;
++                    s.pending_mode = 0U;
++                    s.telem_new = 0U;            /* chờ số liệu của loại frame mới */
++                }
+                 comm_apply_baud(baud);
+                 comm_enter_guard(now_ms, AFTER_GUARD_STREAM);
+             } else if (s.pending_burst != 0U) {
+diff -u original/comm_protocol.h patched/comm_protocol.h
+--- original/comm_protocol.h	2026-11-13 01:13:59.943928406 +0000
++++ patched/comm_protocol.h	2026-11-13 01:14:43.912156169 +0000
+@@ -101,6 +101,8 @@
+ #endif
+ 
+ #define COMM_FRAME_SIZE        16U
++#define COMM_FRAME_V2_SIZE     28U       /* CubliV2 frame, xem mục 6 */
++#define COMM_FRAME_V2_HEADER1  0x56U
+ #define COMM_FRAME_HEADER0     0xAAU
+ #define COMM_FRAME_HEADER1     0x55U
+ #define COMM_BITS_PER_BYTE     10U       /* 8N1 */
+@@ -119,6 +121,47 @@
+     uint16_t power_mw;
+ } comm_telemetry_t;
+ 
++/**
++ * ===========================================================================
++ * 6. FRAME V2 (CubliV2, bật bằng lệnh "CUBLI", tắt bằng "FRAME1")
++ * ===========================================================================
++ *   Byte   Trường        Kiểu       Ý nghĩa
++ *    0     HEADER0       0xAA
++ *    1     HEADER1       0x56
++ *    2     SEQ           uint8
++ *    3     STATUS        uint8      bit0 EKF sẵn sàng, bit1 IMU1, bit2 IMU2,
++ *                                   bit3 gia tốc bị loại, bit4 dùng từ kế,
++ *                                   bit5 lấy mẫu theo chân INT
++ *   4-11   Q0..Q3        int16      quaternion body->world, x 32767
++ *  12-17   GX,GY,GZ      int16      gyro đã trừ bias, đơn vị 1 mrad/s
++ *  18-23   AX,AY,AZ      int16      gia tốc, đơn vị 1/4096 g
++ *  24-25   T_US          uint16     thời điểm lấy mẫu (µs, tràn vòng)
++ *  26-27   CRC16         uint16     CRC-16/CCITT-FALSE (0x1021, init 0xFFFF)
++ *                                   của byte 0..25, byte thấp trước
++ *   "CUBLI": chuyển sang v2 và CFG_UART_CUBLI_BAUD sau frame đang gửi + 20 ms.
++ *   "FRAME1": quay lại v1 và CFG_UART_DEFAULT_BAUD.
++ *   "REINIT": khởi tạo lại EKF (mạch phải đứng yên) -> học lại bias gyro.
++ */
++typedef enum {
++    COMM_FRAME_MODE_V1 = 1,
++    COMM_FRAME_MODE_V2 = 2
++} comm_frame_mode_t;
++
++typedef struct {
++    uint8_t  status;
++    int16_t  q[4];
++    int16_t  gyro_mrads[3];
++    int16_t  accel_4096[3];
++    uint16_t t_us;
++} comm_telemetry_v2_t;
++
++#define COMM_V2_STATUS_EKF_READY   0x01U
++#define COMM_V2_STATUS_IMU1_OK     0x02U
++#define COMM_V2_STATUS_IMU2_OK     0x04U
++#define COMM_V2_STATUS_ACC_REJECT  0x08U
++#define COMM_V2_STATUS_MAG_FUSED   0x10U
++#define COMM_V2_STATUS_DRDY_CLOCK  0x20U
++
+ /** Trạng thái máy truyền. */
+ typedef enum {
+     COMM_STATE_STREAM = 0,    /**< Truyền liên tục. */
+@@ -161,6 +204,12 @@
+ /** Nạp kết quả đo mới nhất (không chặn, an toàn với ngắt). */
+ void Comm_UpdateTelemetry(const comm_telemetry_t *t);
+ 
++/** Nạp số liệu cho frame v2 (dùng khi Comm_GetFrameMode() == V2). */
++void Comm_UpdateTelemetryV2(const comm_telemetry_v2_t *t);
++
++/** Loại frame đang phát. */
++comm_frame_mode_t Comm_GetFrameMode(void);
++
+ /** true nếu module đang ở trạng thái có gửi frame (STREAM/BURST) - khi false
+  *  thì chưa cần tính số liệu mới. */
+ bool Comm_TelemetryWanted(void);
+@@ -200,6 +249,12 @@
+ /** Giải mã + kiểm tra 1 frame 16 byte. false nếu sai header hoặc CRC. */
+ bool Comm_UnpackFrame(const uint8_t in[COMM_FRAME_SIZE], uint8_t *seq, comm_telemetry_t *t);
+ 
++/** CRC-16/CCITT-FALSE. */
++uint16_t Comm_Crc16(const uint8_t *data, uint16_t len);
++
++/** Đóng gói 1 frame v2 28 byte. */
++void Comm_PackFrameV2(uint8_t out[COMM_FRAME_V2_SIZE], uint8_t seq, const comm_telemetry_v2_t *t);
++
+ /** true nếu baud nằm trong danh sách cho phép. */
+ bool Comm_IsBaudSupported(uint32_t baud);
+ 
