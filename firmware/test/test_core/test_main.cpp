@@ -216,6 +216,18 @@ void test_axis_calibration_result_is_usable() {
     TEST_ASSERT_TRUE(cd.motor_axes().valid);
 }
 
+void test_armable_point_count() {
+    CalibrationData c;
+    store_point(c, Vec3{0, 0, 1}, PointKind::kUnknown, -1, 0.17f);                    // a face
+    TEST_ASSERT_EQUAL(1, c.point_count());
+    TEST_ASSERT_EQUAL(0, armable_point_count(c, 0));                                   // nothing to arm on
+    store_point(c, normalized(Vec3{0, 1, 1}), PointKind::kEdge, 0, 0.17f);
+    store_point(c, normalized(Vec3{1, 1, 1}), PointKind::kVertex, -1, 0.17f);
+    TEST_ASSERT_EQUAL(2, armable_point_count(c, 0));
+    TEST_ASSERT_EQUAL(1, armable_point_count(c, 1));                                   // edge only
+    TEST_ASSERT_EQUAL(1, armable_point_count(c, 2));                                   // vertex only
+}
+
 void test_params_motors_off_only() {
     // Changing the DIR or encoder sign while a motor runs flips the feedback sign.
     const char* const kLocked[] = {"m1_dir_inv", "m2_dir_inv", "m3_dir_inv", "m1_enc_inv", "m2_enc_inv", "m3_enc_inv"};
@@ -377,6 +389,7 @@ int main(int, char**) {
     RUN_TEST(test_wheel_speed_constant_rate);
     RUN_TEST(test_params_defaults_in_range_and_roundtrip);
     RUN_TEST(test_params_motors_off_only);
+    RUN_TEST(test_armable_point_count);
     RUN_TEST(test_axis_calibration_result_is_usable);
     RUN_TEST(test_calibration_roundtrip_and_points);
     RUN_TEST(test_supervisor_arm_balance_fall_fault);

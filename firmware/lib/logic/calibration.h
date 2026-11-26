@@ -39,6 +39,11 @@ PointKind classify_point(const MotorAxes& axes, Vec3 up, int* motor);
 /// Returns -1 if none. *angle is the angle to that point (rad).
 int find_nearest_point(const CalibrationData& c, Vec3 up, int mode_filter, float* angle);
 
+/// Points the cube can actually arm on: edge/vertex kind, honouring the mode filter
+/// (0 any, 1 edge, 2 vertex). Points of kind "unknown" (stored before `calib axes`
+/// or on a face) are excluded.
+int armable_point_count(const CalibrationData& c, int mode_filter);
+
 /// Stores a point; replaces an existing point within merge_rad. Returns slot or -1 if full.
 int store_point(CalibrationData& c, Vec3 up, PointKind kind, int motor, float merge_rad);
 

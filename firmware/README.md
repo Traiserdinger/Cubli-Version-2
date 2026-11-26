@@ -75,7 +75,7 @@ any state -- latched fault --> FAULT -- "fault clear" once the cause is gone -->
 ```
 
 READY = IMU frame v2 with EKF ready, battery present and above cut-off, motor axes calibrated,
-at least one balance point stored. In ARMING the motors stay braked until the cube is held within
+at least one edge/vertex point allowed by `mode`. In ARMING the motors stay braked until the cube is held within
 `arm_cap` (2°) of a stored point and still for `arm_hold` (0.3 s); then the matching controller
 starts by itself.
 

@@ -703,7 +703,7 @@ void ControlLoop::step(int64_t now_us, bool new_frame) {
     if (numeric_fault_) cond |= cubli::fault::kNumeric;
     sin_.fault_conditions = cond;
     sin_.axes_valid = axes_.valid;
-    sin_.point_count = cal_.point_count();
+    sin_.point_count = cubli::armable_point_count(cal_, static_cast<int>(p_.mode));
     sin_.calibrating = calibrating();
     float ang = 1e9f;
     const int near = imu_ok_ ? cubli::find_nearest_point(cal_, up_, static_cast<int>(p_.mode), &ang) : -1;

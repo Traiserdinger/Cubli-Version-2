@@ -64,6 +64,16 @@ int find_nearest_point(const CalibrationData& c, Vec3 up, int mode_filter, float
     return best;
 }
 
+int armable_point_count(const CalibrationData& c, int mode_filter) {
+    int n = 0;
+    for (const BalancePoint& p : c.points) {
+        if (!p.valid) continue;
+        const bool edge = p.kind == PointKind::kEdge, vertex = p.kind == PointKind::kVertex;
+        if ((mode_filter == 1 && edge) || (mode_filter == 2 && vertex) || (mode_filter != 1 && mode_filter != 2 && (edge || vertex))) ++n;
+    }
+    return n;
+}
+
 int store_point(CalibrationData& c, Vec3 up, PointKind kind, int motor, float merge_rad) {
     int slot = -1;
     for (int i = 0; i < kMaxBalancePoints; ++i) {
