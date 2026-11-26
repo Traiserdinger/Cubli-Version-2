@@ -16,7 +16,8 @@ constexpr uint32_t kSearchBauds[] = {hw::kImuFastBaud, hw::kImuBootBaud, 921600,
 constexpr int kNumSearchBauds = sizeof(kSearchBauds) / sizeof(kSearchBauds[0]);
 constexpr int64_t kSearchDwellUs = 150000;
 constexpr int64_t kUpgradeTimeoutUs = 400000;
-constexpr int64_t kUpgradeRetryUs = 600000;
+constexpr int64_t kUpgradeRetryUs = 600000;     // first retry interval after a failed upgrade
+constexpr int64_t kUpgradeRetryMaxUs = 30000000; // backoff limit (stock IMU PCB firmware never answers)
 constexpr int64_t kLinkLostUs = 300000;
 constexpr uint32_t kLockFrames = 3;
 
@@ -79,6 +80,8 @@ void ImuLink::restart_search() {
     set_baud(kSearchBauds[0]);
     frames_in_state_ = 0;
     state_since_us_ = 0;
+    upgrade_tried_ = false;
+    upgrade_interval_us_ = kUpgradeRetryUs;
 }
 
 bool ImuLink::poll(uint32_t timeout_us, int64_t now_us) {
@@ -113,6 +116,7 @@ bool ImuLink::poll(uint32_t timeout_us, int64_t now_us) {
                 if (state_ != State::kV2 && frames_in_state_ >= kLockFrames) {
                     state_ = State::kV2;
                     state_since_us_ = now_us;
+                    upgrade_interval_us_ = kUpgradeRetryUs;
                 }
             } else if (r == cubli::ImuFrameParser::Result::kFrameV1) {
                 last_frame_us_ = now_us;
@@ -136,12 +140,13 @@ bool ImuLink::poll(uint32_t timeout_us, int64_t now_us) {
         case State::kV1:
             if (now_us - last_frame_us_ > kLinkLostUs) {
                 restart_search();
-            } else if (now_us - last_upgrade_us_ > kUpgradeRetryUs) {
+            } else if (now_us - last_upgrade_us_ > upgrade_interval_us_) {
                 // Ask the IMU PCB for frame v2; it switches to 460800 after the
                 // current frame plus 20 ms of silence.
                 write_text("CUBLI");
                 uart_wait_tx_done(kPort, pdMS_TO_TICKS(20));
                 last_upgrade_us_ = now_us;
+                upgrade_tried_ = true;
                 set_baud(hw::kImuFastBaud);
                 state_ = State::kUpgrading;
                 state_since_us_ = now_us;
@@ -150,12 +155,18 @@ bool ImuLink::poll(uint32_t timeout_us, int64_t now_us) {
             break;
         case State::kUpgrading:
             if (now_us - state_since_us_ > kUpgradeTimeoutUs) {
-                // No v2: IMU PCB firmware without the CubliV2 patch. Stay on v1.
+                // No v2: IMU PCB firmware without the CubliV2 patch. Go straight
+                // back to v1 @57600 (it was streaming there a moment ago) and back
+                // off before the next attempt; v1 link loss still restarts the search.
                 set_baud(hw::kImuBootBaud);
-                state_ = State::kSearching;
+                state_ = State::kV1;
                 baud_index_ = 1;
                 state_since_us_ = now_us;
+                last_frame_us_ = now_us;
+                last_upgrade_us_ = now_us;
                 frames_in_state_ = 0;
+                upgrade_interval_us_ = upgrade_interval_us_ * 2 < kUpgradeRetryMaxUs ? upgrade_interval_us_ * 2
+                                                                                      : kUpgradeRetryMaxUs;
             }
             break;
         case State::kV2:
@@ -175,7 +186,10 @@ void ImuLink::on_frame_v1(int64_t now_us) {
         if (++frames_in_state_ >= kLockFrames) {
             state_ = State::kV1;
             state_since_us_ = now_us;
-            last_upgrade_us_ = now_us - kUpgradeRetryUs + 50000;  // upgrade after 50 ms
+            if (upgrade_interval_us_ <= 0) upgrade_interval_us_ = kUpgradeRetryUs;
+            // First lock: upgrade after 50 ms. After a failed attempt keep the
+            // backoff timing instead of re-arming the quick upgrade.
+            if (!upgrade_tried_) last_upgrade_us_ = now_us - upgrade_interval_us_ + 50000;
         }
     }
 }
