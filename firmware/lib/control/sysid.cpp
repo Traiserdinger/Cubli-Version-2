@@ -190,7 +190,23 @@ MotorIdResult identify_motor(const float* s, const float* u, int n, float dt, fl
     }
     r.c = static_cast<float>(beta[0]);
     r.kv = beta[0] != 0 ? static_cast<float>(-beta[1] / beta[0]) : 0.0f;
-    r.r2 = static_cast<float>(r2);
+    // Fit quality on the wheel speed itself: simulate the identified model with the
+    // recorded command and compare with the measured (filtered) speed. The R2 of the
+    // regression above is computed on s_dot, i.e. on the encoder angle differentiated
+    // twice, and is dominated by the 400-CPR quantisation noise even for a perfect fit.
+    (void)r2;
+    double mean = 0;
+    for (int i = 0; i < n; ++i) mean += static_cast<double>(g_x[2][i]);
+    mean /= n;
+    double sim = static_cast<double>(g_x[2][0]), ss_res = 0, ss_tot = 0;
+    for (int i = 0; i < n; ++i) {
+        const double y = static_cast<double>(g_x[2][i]);
+        const double e = y - sim, d = y - mean;
+        ss_res += e * e;
+        ss_tot += d * d;
+        sim += static_cast<double>(dt) * (beta[0] * static_cast<double>(g_x[3][i]) + beta[1] * sim);
+    }
+    r.r2 = static_cast<float>(ss_tot > 0 ? 1.0 - ss_res / ss_tot : 0.0);
     if (!(r.c > 0.0f)) r.error = "c <= 0: positive command does not speed the wheel up (enc_invert?)";
     else if (!(r.kv >= 0.0f)) r.error = "negative back-EMF estimate";
     else if (r.r2 < 0.8f) r.error = "poor fit (R2 < 0.8)";
