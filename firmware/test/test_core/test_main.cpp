@@ -156,6 +156,16 @@ void test_up_vector_from_quaternion() {
 }
 
 // ---------------------------------------------------------------- INA219
+void test_ina219_shunt_saturation() {
+    // PGA /4 (160 mV, i_range_a = 3 A at 50 mOhm): the shunt register clips at
+    // +-16000 LSB. A clipped reading must be flagged so over-current can still trip.
+    TEST_ASSERT_TRUE(ina219::shunt_saturated(16000, 2));
+    TEST_ASSERT_TRUE(ina219::shunt_saturated(static_cast<uint16_t>(-16000), 2));
+    TEST_ASSERT_FALSE(ina219::shunt_saturated(10000, 2));  // 100 mV = 2 A: fine
+    TEST_ASSERT_FALSE(ina219::shunt_saturated(16000, 3));  // same value inside the 320 mV range
+    TEST_ASSERT_TRUE(ina219::shunt_saturated(32000, 3));
+}
+
 void test_ina219_math() {
     // 0.05 ohm, 6 A -> 300 mV -> PGA /8 (320 mV)
     TEST_ASSERT_EQUAL_UINT8(3, ina219::select_pga(6.0f, 0.05f));
@@ -363,6 +373,7 @@ int main(int, char**) {
     RUN_TEST(test_parser_v1_and_v2_with_garbage);
     RUN_TEST(test_up_vector_from_quaternion);
     RUN_TEST(test_ina219_math);
+    RUN_TEST(test_ina219_shunt_saturation);
     RUN_TEST(test_wheel_speed_constant_rate);
     RUN_TEST(test_params_defaults_in_range_and_roundtrip);
     RUN_TEST(test_params_motors_off_only);

@@ -35,6 +35,7 @@ bool Ina219::init() {
 bool Ina219::configure(float shunt_ohm, float max_current_a) {
     shunt_ohm_ = shunt_ohm;
     const uint8_t pga = cubli::ina219::select_pga(max_current_a, shunt_ohm);
+    pga_ = pga;
     const uint16_t cfg = cubli::ina219::make_config(pga);
     uint16_t back = 0;
     present_ = write_reg(cubli::ina219::kRegConfig, cfg) && read_reg(cubli::ina219::kRegConfig, &back) && back == cfg;
@@ -50,7 +51,9 @@ bool Ina219::read(float* volts, float* amps, bool* overflow) {
     const auto b = cubli::ina219::decode_bus(bus);
     *volts = b.volts;
     *amps = cubli::ina219::decode_current(shunt, shunt_ohm_);
-    *overflow = b.overflow;
+    // Clipped shunt ADC (current above the selected full scale, e.g. i_range_a set
+    // below i_trip_a) counts as overflow: the power task treats it as over-current.
+    *overflow = b.overflow || cubli::ina219::shunt_saturated(shunt, pga_);
     present_ = true;
     return true;
 }
