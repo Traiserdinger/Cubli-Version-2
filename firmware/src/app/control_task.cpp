@@ -583,6 +583,9 @@ void ControlLoop::apply_outputs(const float u_in[3], bool want_release, float dt
         // keep BRAKE released (coast) while a wheel is still fast, at most coast_s.
         const float since = static_cast<float>(now - inactive_since_us_) * 1e-6f;
         release = motors_->brake_released() && max_wheel_speed() > p_.brake_rads && since < p_.coast_s;
+        // An explicit 'brake on' on the bench is an operator command, not a soft
+        // stop: brake at once instead of coasting.
+        if (sup_.state() == SysState::kBench && bench_brake_engaged_) release = false;
     }
     if (g_deadman_tripped.load()) release = false;  // the timer already braked: stay braked
 
