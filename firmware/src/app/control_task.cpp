@@ -117,6 +117,7 @@ private:
     float wheel_speed_[3] = {0, 0, 0};
     int32_t enc_count_[3] = {0, 0, 0};
     int32_t enc_zero_[3] = {0, 0, 0};
+    int8_t enc_inv_applied_[3] = {-1, -1, -1};  // inversion the estimators were reset with
     Vec3 up_{0, 0, 1}, gyro_, accel_;
     uint8_t imu_status_ = 0;
     bool imu_ok_ = false;
@@ -633,7 +634,16 @@ void ControlLoop::step(int64_t now_us, bool new_frame) {
     // ---- encoders ----
     for (int k = 0; k < 3; ++k) {
         const int32_t raw = enc_->count(k);
-        enc_count_[k] = p_.enc_inv(k) > 0.5f ? -raw : raw;
+        const int8_t inv = p_.enc_inv(k) > 0.5f ? 1 : 0;
+        enc_count_[k] = inv ? -raw : raw;
+        if (inv != enc_inv_applied_[k]) {
+            // Sign convention changed (m<n>_enc_inv): the estimator window still
+            // holds counts of the old sign, re-base it instead of differentiating
+            // a jump of 2x the accumulated count (fake overspeed).
+            if (enc_inv_applied_[k] >= 0) enc_zero_[k] = -enc_zero_[k];
+            enc_inv_applied_[k] = inv;
+            wheel_[k].reset(enc_count_[k], static_cast<uint32_t>(now_us));
+        }
         wheel_speed_[k] = wheel_[k].update(enc_count_[k], static_cast<uint32_t>(now_us), static_cast<int>(p_.wheel_win),
                                            p_.wheel_fc, hw::kEncoderCountsPerRev);
     }
