@@ -259,14 +259,15 @@ void cmd_wiretest(Ctx& c, int argc, char** argv) {
         return;
     }
     const int k = n - 1;
-    c.out.printf(
-        "WIRE TEST motor %d = schematic Motor %d = connector %s = silkscreen %s (%s edge)\r\n"
+    // Output::printf formats into 256 bytes: only the variable header goes through it.
+    c.out.printf("WIRE TEST motor %d = schematic Motor %d = connector %s = silkscreen %s (%s edge)\r\n", n, n,
+                 board::kMotorConnector[k], board::kMotorSilkscreen[k], board::kMotorBoardEdge[k]);
+    c.out.print(
         "Expected wiring (context.md 5.1): 1 red +12V, 2 black GND, 3 yellow BRAKE, 4 white PWM (inverted),\r\n"
         "  5 green DIR, 6 blue +5V encoder, 7 purple CHB, 8 grey CHA. Pin 1 = square pad.\r\n"
         "Step A (by hand, no battery needed): 'enc zero', turn the wheel exactly 10 turns, 'enc'.\r\n"
         "  Expect |count| = 4000 (400 CPR). 0 -> encoder supply/signals; ~2000 -> one channel missing.\r\n"
-        "Step B (automatic, battery, wheel free): +15%% 1 s, coast, -15%% 1 s, coast, +15%% with BRAKE on.\r\n",
-        n, n, board::kMotorConnector[k], board::kMotorSilkscreen[k], board::kMotorBoardEdge[k]);
+        "Step B (automatic, battery, wheel free): +15% 1 s, coast, -15% 1 s, coast, +15% with BRAKE on.\r\n");
     const ControlStatus s = status();
     if (s.state != SysState::kBench) {
         send_command(Cmd::kBenchOn);
