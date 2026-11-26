@@ -36,6 +36,17 @@ ControlStatus status() {
 
 bool motors_running() { return g_motors_live.load(); }
 
+/// Commands that would break a running controller (IMU link/EKF restart, sign
+/// changes, bulk parameter reloads) are refused while balancing, calibrating or
+/// while any motor may turn. Prints the reason; returns true if refused.
+bool refuse_while_active(Output& out, const char* what) {
+    const ControlStatus s = status();
+    const bool active = s.state == SysState::kArmedEdge || s.state == SysState::kArmedVertex ||
+                        s.state == SysState::kCalibrate || motors_running();
+    if (active) out.printf("! %s refused in %s: disarm / stop the motors first\r\n", what, cubli::sys_state_name(s.state));
+    return active;
+}
+
 const char* kind_name(cubli::PointKind k) {
     switch (k) {
         case cubli::PointKind::kEdge: return "edge";
@@ -164,6 +175,7 @@ void cmd_enc(Ctx& c, int argc, char** argv) {
 
 void cmd_imu(Ctx& c, int argc, char** argv) {
     if (argc > 1 && !std::strcmp(argv[1], "send") && argc > 2) {
+        if (refuse_while_active(c.out, "imu send")) return;
         ControlCommand cc;
         cc.cmd = Cmd::kImuSend;
         std::strncpy(cc.text, argv[2], sizeof(cc.text) - 1);
@@ -172,6 +184,7 @@ void cmd_imu(Ctx& c, int argc, char** argv) {
         return;
     }
     if (argc > 1 && !std::strcmp(argv[1], "restart")) {
+        if (refuse_while_active(c.out, "imu restart")) return;
         send_command(Cmd::kImuRestart);
         c.out.print("IMU link: searching again\r\n");
         return;
@@ -291,6 +304,7 @@ void cmd_param(Ctx& c, int argc, char** argv) {
         c.out.printf("%s = %s  (default %g, range %g..%g) %s\r\n", pi.name, buf, static_cast<double>(pi.def),
                      static_cast<double>(pi.min), static_cast<double>(pi.max), pi.help);
     } else if (!std::strcmp(sub, "set") && argc > 3) {
+        if (cubli::param_motors_off_only(cubli::param_find(argv[2])) && refuse_while_active(c.out, argv[2])) return;
         const char* err = nullptr;
         g_params.update([&](cubli::Params& p) {
             err = cubli::param_set_text(p, argv[2], argv[3]);
@@ -305,12 +319,14 @@ void cmd_param(Ctx& c, int argc, char** argv) {
         }
         c.out.print(hal::nvs_save_params(g_params.get()) ? "parameters saved\r\n" : "! NVS write failed\r\n");
     } else if (!std::strcmp(sub, "reset")) {
+        if (refuse_while_active(c.out, "param reset")) return;
         g_params.update([](cubli::Params& p) {
             cubli::params_set_defaults(p);
             return true;
         });
         c.out.print("defaults loaded (not saved)\r\n");
     } else if (!std::strcmp(sub, "load")) {
+        if (refuse_while_active(c.out, "param load")) return;
         cubli::Params p;
         const int n = hal::nvs_load_params(p);
         g_params.update([&](cubli::Params& q) {
@@ -362,6 +378,7 @@ void cmd_calib(Ctx& c, int argc, char** argv) {
         send_command(Cmd::kCalibClear, all ? 1 : 0);
         c.out.print(all ? "axes and balance points cleared\r\n" : "balance points cleared\r\n");
     } else if (!std::strcmp(sub, "gyro")) {
+        if (refuse_while_active(c.out, "calib gyro")) return;
         ControlCommand cc;
         cc.cmd = Cmd::kImuSend;
         std::strncpy(cc.text, "REINIT", sizeof(cc.text) - 1);

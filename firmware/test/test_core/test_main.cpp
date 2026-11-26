@@ -187,6 +187,15 @@ void test_wheel_speed_constant_rate() {
 }
 
 // ---------------------------------------------------------------- params
+void test_params_motors_off_only() {
+    // Changing the DIR or encoder sign while a motor runs flips the feedback sign.
+    const char* const kLocked[] = {"m1_dir_inv", "m2_dir_inv", "m3_dir_inv", "m1_enc_inv", "m2_enc_inv", "m3_enc_inv"};
+    for (const char* n : kLocked) TEST_ASSERT_TRUE_MESSAGE(param_motors_off_only(param_find(n)), n);
+    TEST_ASSERT_FALSE(param_motors_off_only(param_find("e_k1")));   // live tuning stays allowed
+    TEST_ASSERT_FALSE(param_motors_off_only(param_find("m1_kv")));
+    TEST_ASSERT_FALSE(param_motors_off_only(-1));
+}
+
 void test_params_defaults_in_range_and_roundtrip() {
     Params p;
     params_set_defaults(p);
@@ -337,6 +346,7 @@ int main(int, char**) {
     RUN_TEST(test_ina219_math);
     RUN_TEST(test_wheel_speed_constant_rate);
     RUN_TEST(test_params_defaults_in_range_and_roundtrip);
+    RUN_TEST(test_params_motors_off_only);
     RUN_TEST(test_calibration_roundtrip_and_points);
     RUN_TEST(test_supervisor_arm_balance_fall_fault);
     RUN_TEST(test_supervisor_battery_low_blocks_but_latches_only_when_running);

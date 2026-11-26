@@ -341,8 +341,14 @@ void ControlLoop::handle(const ControlCommand& c) {
                 rec_target_s_ = cubli::clampf(static_cast<float>(c.i0) * 1e-3f, 0.1f, 2.5f);
             }
             break;
-        case Cmd::kImuSend: imu_->send_command(c.text); break;
-        case Cmd::kImuRestart: imu_->restart_search(); break;
+        // Last line of defence (the console refuses these too): restarting the link
+        // or sending a baud / REINIT command mid-balance would drop the IMU.
+        case Cmd::kImuSend:
+            if (!sup_.armed() && !calibrating()) imu_->send_command(c.text);
+            break;
+        case Cmd::kImuRestart:
+            if (!sup_.armed() && !calibrating()) imu_->restart_search();
+            break;
     }
 }
 
