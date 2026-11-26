@@ -540,7 +540,10 @@ void ControlLoop::compute_outputs(int64_t now_us, float dt, float u[3], bool& wa
                 Recording& r = g_recording;
                 if (r.count < static_cast<int>(sizeof(r.samples) / sizeof(r.samples[0]))) {
                     cubli::SysIdSample& s = r.samples[r.count++];
-                    s.dt = 0.002f;
+                    // Real sample spacing: the loop runs at 1 kHz only while IMU
+                    // frame v2 paces it (2 ms without frames).
+                    s.dt = r.count > 1 ? static_cast<float>(now_us - last_rec_us_) * 1e-6f : 0.002f;
+                    last_rec_us_ = now_us;
                     s.wheel_angle[0] = wheel_[proc_motor_].angle(hw::kEncoderCountsPerRev);
                     s.u[0] = motors_->command(proc_motor_);
                 }

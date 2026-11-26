@@ -655,12 +655,18 @@ void report_identification(Output& out) {
         static float* speed = new float[cubli::kSysIdMaxSamples];  // once, outside the control loop
         static float* cmd = new float[cubli::kSysIdMaxSamples];
         const int n = r.count;
+        // Sample spacing as recorded (1 kHz loop -> 2 ms, 500 Hz without IMU frames -> 4 ms).
+        static float* t = new float[cubli::kSysIdMaxSamples];
+        float acc = 0.0f;
+        for (int i = 0; i < n; ++i) t[i] = (acc += i > 0 ? r.samples[i].dt : 0.0f);
         for (int i = 0; i < n; ++i) {
             const int a = i > 0 ? i - 1 : 0, b = i < n - 1 ? i + 1 : n - 1;
-            speed[i] = (r.samples[b].wheel_angle[0] - r.samples[a].wheel_angle[0]) / (0.002f * static_cast<float>(b - a));
+            const float span = t[b] - t[a];
+            speed[i] = span > 0.0f ? (r.samples[b].wheel_angle[0] - r.samples[a].wheel_angle[0]) / span : 0.0f;
             cmd[i] = r.samples[i].u[0];
         }
-        const cubli::MotorIdResult m = cubli::identify_motor(speed, cmd, n, 0.002f, p.at_fc);
+        const float dt_mean = n > 1 && t[n - 1] > 0.0f ? t[n - 1] / static_cast<float>(n - 1) : 0.002f;
+        const cubli::MotorIdResult m = cubli::identify_motor(speed, cmd, n, dt_mean, p.at_fc);
         out.printf("sysid motor %d: c %.1f  kv %.5f (no-load speed at full command %.0f rad/s)  R2 %.3f  %s\r\n",
                    r.motor + 1, static_cast<double>(m.c), static_cast<double>(m.kv),
                    m.kv > 0 ? 1.0 / static_cast<double>(m.kv) : 0.0, static_cast<double>(m.r2),
