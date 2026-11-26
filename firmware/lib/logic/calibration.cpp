@@ -181,7 +181,7 @@ void AxisCalibrator::step(float dt, Vec3 gyro, float u_out[kMotors]) {
                 phase_ = Phase::kSettle;
                 t_ = 0.0f;
                 if (motor_ >= kMotors) {
-                    if (result_.finalize(0.35f)) {
+                    if (result_.finalize(kAxesMaxCos)) {
                         status_ = Status::kDone;
                     } else {
                         status_ = Status::kFailed;

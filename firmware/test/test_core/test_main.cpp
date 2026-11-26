@@ -187,6 +187,25 @@ void test_wheel_speed_constant_rate() {
 }
 
 // ---------------------------------------------------------------- params
+void test_axis_calibration_result_is_usable() {
+    // A skewed mounting (|cos| = 0.32) accepted by the calibrator must also be
+    // valid for the controller (CalibrationData::motor_axes()).
+    const Vec3 true_axis[3] = {{1, 0, 0}, normalized(Vec3{0.32f, std::sqrt(1 - 0.32f * 0.32f), 0}), {0, 0, 1}};
+    AxisCalibrator cal;
+    cal.start(AxisCalibrator::Config{});
+    float u[3];
+    Vec3 w{};
+    for (int i = 0; i < 20000 && cal.status() == AxisCalibrator::Status::kRunning; ++i) {
+        cal.step(0.001f, w, u);
+        for (int k = 0; k < 3; ++k) w += true_axis[k] * (u[k] * 0.02f);
+    }
+    TEST_ASSERT_EQUAL(static_cast<int>(AxisCalibrator::Status::kDone), static_cast<int>(cal.status()));
+    CalibrationData cd;
+    for (int k = 0; k < 3; ++k) cd.axis[k] = cal.result().axis[k];
+    cd.axes_valid = 1;
+    TEST_ASSERT_TRUE(cd.motor_axes().valid);
+}
+
 void test_params_motors_off_only() {
     // Changing the DIR or encoder sign while a motor runs flips the feedback sign.
     const char* const kLocked[] = {"m1_dir_inv", "m2_dir_inv", "m3_dir_inv", "m1_enc_inv", "m2_enc_inv", "m3_enc_inv"};
@@ -347,6 +366,7 @@ int main(int, char**) {
     RUN_TEST(test_wheel_speed_constant_rate);
     RUN_TEST(test_params_defaults_in_range_and_roundtrip);
     RUN_TEST(test_params_motors_off_only);
+    RUN_TEST(test_axis_calibration_result_is_usable);
     RUN_TEST(test_calibration_roundtrip_and_points);
     RUN_TEST(test_supervisor_arm_balance_fall_fault);
     RUN_TEST(test_supervisor_battery_low_blocks_but_latches_only_when_running);

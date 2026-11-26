@@ -523,7 +523,10 @@ void ControlLoop::compute_outputs(int64_t now_us, float dt, float u[3], bool& wa
         want_release = true;
         if (procedure_ == Procedure::kAxes) {
             axis_cal_.step(dt, gyro_, u);
-            if (axis_cal_.status() == cubli::AxisCalibrator::Status::kDone) {
+            if (axis_cal_.status() == cubli::AxisCalibrator::Status::kDone && !axis_cal_.result().valid) {
+                post(Ev::kAxesFailed, axis_cal_.current_motor());  // never report success for unusable axes
+                procedure_ = Procedure::kNone;
+            } else if (axis_cal_.status() == cubli::AxisCalibrator::Status::kDone) {
                 const cubli::MotorAxes& r = axis_cal_.result();
                 for (int k = 0; k < 3; ++k) cal_.axis[k] = r.axis[k];
                 cal_.axes_valid = 1;
