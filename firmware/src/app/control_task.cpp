@@ -405,6 +405,9 @@ void ControlLoop::enter_armed(SysState s) {
         rec_div_ = 0;
         rec_target_s_ = 0.8f;
     }
+    // A drop request applies to this capture only: captured on a vertex (or not
+    // startable) it is cancelled, so a later edge capture (rearm) balances normally.
+    drop_pending_ = false;
 }
 
 void ControlLoop::compute_outputs(int64_t now_us, float dt, float u[3], bool& want_release) {
