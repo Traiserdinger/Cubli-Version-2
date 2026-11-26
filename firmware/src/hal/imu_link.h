@@ -47,6 +47,8 @@ private:
     int baud_index_ = 0;
     int64_t state_since_us_ = 0, last_v2_us_ = 0, last_frame_us_ = 0, last_upgrade_us_ = 0;
     uint32_t frames_in_state_ = 0, frames_in_poll_ = 0, overflows_ = 0;
+    int64_t upgrade_interval_us_ = 0;  // current retry interval (backs off after failures)
+    bool upgrade_tried_ = false;       // an upgrade was attempted since the last (re)search
     char pending_cmd_[24] = {0};
     bool cmd_pending_ = false;
 };

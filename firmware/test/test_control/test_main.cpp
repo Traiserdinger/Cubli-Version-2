@@ -336,6 +336,35 @@ void test_sysid_motor() {
     TEST_ASSERT_FLOAT_WITHIN(kv_eff * 0.05, kv_eff, r.kv);
 }
 
+void test_sysid_motor_with_encoder_quantisation() {
+    // Same pipeline as the firmware: staircase of control_task.cpp, wheel angle from a
+    // 400-CPR encoder sampled every 2 ms, speed by central differences (console.cpp).
+    static const float kT[4] = {0.6f, 1.2f, 1.8f, 2.5f};
+    static const float kU[4] = {0.15f, 0.45f, 0.15f, 0.30f};
+    constexpr double kC = 167.0, kKv = 0.0025;
+    static float angle[1250], u[1250], speed[1250];
+    double sv = 0, a = 0;
+    for (int n = 0; n < 1250; ++n) {
+        const float t = static_cast<float>(n) * 0.002f;
+        int i = 0;
+        while (i < 3 && t > kT[i]) ++i;
+        for (int j = 0; j < 40; ++j) {
+            sv += kC * (kU[i] - kKv * sv) * 5e-5;
+            a += sv * 5e-5;
+        }
+        angle[n] = static_cast<float>(std::floor(a * 400.0 / (2 * M_PI)) * 2 * M_PI / 400.0);
+        u[n] = kU[i];
+    }
+    for (int n = 0; n < 1250; ++n) {
+        const int i0 = n > 0 ? n - 1 : 0, i1 = n < 1249 ? n + 1 : 1249;
+        speed[n] = (angle[i1] - angle[i0]) / (0.002f * static_cast<float>(i1 - i0));
+    }
+    const MotorIdResult r = identify_motor(speed, u, 1250, 0.002f, 25.0f);
+    TEST_ASSERT_TRUE_MESSAGE(r.ok, r.error);
+    TEST_ASSERT_FLOAT_WITHIN(kKv * 0.1, kKv, r.kv);
+    TEST_ASSERT_FLOAT_WITHIN(kC * 0.1, kC, r.c);
+}
+
 void test_axis_calibration_finds_true_axes() {
     sim::VertexPlant pl;
     pl.make_free();  // cube held loosely in the hand
@@ -379,6 +408,7 @@ int main(int, char**) {
     RUN_TEST(test_sysid_edge_recovers_model_in_closed_loop);
     RUN_TEST(test_sysid_vertex_recovers_model);
     RUN_TEST(test_sysid_motor);
+    RUN_TEST(test_sysid_motor_with_encoder_quantisation);
     RUN_TEST(test_axis_calibration_finds_true_axes);
     RUN_TEST(test_point_classification);
     return UNITY_END();

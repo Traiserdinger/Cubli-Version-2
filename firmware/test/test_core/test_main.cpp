@@ -156,6 +156,16 @@ void test_up_vector_from_quaternion() {
 }
 
 // ---------------------------------------------------------------- INA219
+void test_ina219_shunt_saturation() {
+    // PGA /4 (160 mV, i_range_a = 3 A at 50 mOhm): the shunt register clips at
+    // +-16000 LSB. A clipped reading must be flagged so over-current can still trip.
+    TEST_ASSERT_TRUE(ina219::shunt_saturated(16000, 2));
+    TEST_ASSERT_TRUE(ina219::shunt_saturated(static_cast<uint16_t>(-16000), 2));
+    TEST_ASSERT_FALSE(ina219::shunt_saturated(10000, 2));  // 100 mV = 2 A: fine
+    TEST_ASSERT_FALSE(ina219::shunt_saturated(16000, 3));  // same value inside the 320 mV range
+    TEST_ASSERT_TRUE(ina219::shunt_saturated(32000, 3));
+}
+
 void test_ina219_math() {
     // 0.05 ohm, 6 A -> 300 mV -> PGA /8 (320 mV)
     TEST_ASSERT_EQUAL_UINT8(3, ina219::select_pga(6.0f, 0.05f));
@@ -187,6 +197,46 @@ void test_wheel_speed_constant_rate() {
 }
 
 // ---------------------------------------------------------------- params
+void test_axis_calibration_result_is_usable() {
+    // A skewed mounting (|cos| = 0.32) accepted by the calibrator must also be
+    // valid for the controller (CalibrationData::motor_axes()).
+    const Vec3 true_axis[3] = {{1, 0, 0}, normalized(Vec3{0.32f, std::sqrt(1 - 0.32f * 0.32f), 0}), {0, 0, 1}};
+    AxisCalibrator cal;
+    cal.start(AxisCalibrator::Config{});
+    float u[3];
+    Vec3 w{};
+    for (int i = 0; i < 20000 && cal.status() == AxisCalibrator::Status::kRunning; ++i) {
+        cal.step(0.001f, w, u);
+        for (int k = 0; k < 3; ++k) w += true_axis[k] * (u[k] * 0.02f);
+    }
+    TEST_ASSERT_EQUAL(static_cast<int>(AxisCalibrator::Status::kDone), static_cast<int>(cal.status()));
+    CalibrationData cd;
+    for (int k = 0; k < 3; ++k) cd.axis[k] = cal.result().axis[k];
+    cd.axes_valid = 1;
+    TEST_ASSERT_TRUE(cd.motor_axes().valid);
+}
+
+void test_armable_point_count() {
+    CalibrationData c;
+    store_point(c, Vec3{0, 0, 1}, PointKind::kUnknown, -1, 0.17f);                    // a face
+    TEST_ASSERT_EQUAL(1, c.point_count());
+    TEST_ASSERT_EQUAL(0, armable_point_count(c, 0));                                   // nothing to arm on
+    store_point(c, normalized(Vec3{0, 1, 1}), PointKind::kEdge, 0, 0.17f);
+    store_point(c, normalized(Vec3{1, 1, 1}), PointKind::kVertex, -1, 0.17f);
+    TEST_ASSERT_EQUAL(2, armable_point_count(c, 0));
+    TEST_ASSERT_EQUAL(1, armable_point_count(c, 1));                                   // edge only
+    TEST_ASSERT_EQUAL(1, armable_point_count(c, 2));                                   // vertex only
+}
+
+void test_params_motors_off_only() {
+    // Changing the DIR or encoder sign while a motor runs flips the feedback sign.
+    const char* const kLocked[] = {"m1_dir_inv", "m2_dir_inv", "m3_dir_inv", "m1_enc_inv", "m2_enc_inv", "m3_enc_inv"};
+    for (const char* n : kLocked) TEST_ASSERT_TRUE_MESSAGE(param_motors_off_only(param_find(n)), n);
+    TEST_ASSERT_FALSE(param_motors_off_only(param_find("e_k1")));   // live tuning stays allowed
+    TEST_ASSERT_FALSE(param_motors_off_only(param_find("m1_kv")));
+    TEST_ASSERT_FALSE(param_motors_off_only(-1));
+}
+
 void test_params_defaults_in_range_and_roundtrip() {
     Params p;
     params_set_defaults(p);
@@ -335,8 +385,12 @@ int main(int, char**) {
     RUN_TEST(test_parser_v1_and_v2_with_garbage);
     RUN_TEST(test_up_vector_from_quaternion);
     RUN_TEST(test_ina219_math);
+    RUN_TEST(test_ina219_shunt_saturation);
     RUN_TEST(test_wheel_speed_constant_rate);
     RUN_TEST(test_params_defaults_in_range_and_roundtrip);
+    RUN_TEST(test_params_motors_off_only);
+    RUN_TEST(test_armable_point_count);
+    RUN_TEST(test_axis_calibration_result_is_usable);
     RUN_TEST(test_calibration_roundtrip_and_points);
     RUN_TEST(test_supervisor_arm_balance_fall_fault);
     RUN_TEST(test_supervisor_battery_low_blocks_but_latches_only_when_running);

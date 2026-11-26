@@ -31,6 +31,12 @@ BusReading decode_bus(uint16_t reg) {
     return r;
 }
 
+bool shunt_saturated(uint16_t shunt_reg, uint8_t pga) {
+    const int raw = static_cast<int16_t>(shunt_reg);
+    const int limit = static_cast<int>(pga_range_v(pga) / kShuntLsbV + 0.5f);  // 4000 .. 32000 LSB
+    return (raw < 0 ? -raw : raw) >= limit - limit / 200;                      // within 0.5 % of the clip
+}
+
 float decode_current(uint16_t shunt_reg, float shunt_ohm) {
     if (!(shunt_ohm > 0.0f)) return 0.0f;
     const int16_t raw = static_cast<int16_t>(shunt_reg);

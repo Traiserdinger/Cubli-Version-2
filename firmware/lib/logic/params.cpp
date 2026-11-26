@@ -55,6 +55,18 @@ int param_find(const char* name) {
     return -1;
 }
 
+bool param_motors_off_only(int i) {
+    if (i < 0 || static_cast<size_t>(i) >= kCount) return false;
+    const size_t off = kTable[i].offset;
+    for (int k = 0; k < 3; ++k) {
+        Params p{};
+        if (off == static_cast<size_t>(reinterpret_cast<uint8_t*>(p.dir_inv_ptr(k)) - reinterpret_cast<uint8_t*>(&p)) ||
+            off == static_cast<size_t>(reinterpret_cast<uint8_t*>(p.enc_inv_ptr(k)) - reinterpret_cast<uint8_t*>(&p)))
+            return true;
+    }
+    return false;
+}
+
 void params_set_defaults(Params& p) {
     for (size_t i = 0; i < kCount; ++i) *field(p, i) = kTable[i].def;
 }

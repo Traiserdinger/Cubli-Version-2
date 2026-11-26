@@ -30,6 +30,11 @@ struct BusReading {
 };
 BusReading decode_bus(uint16_t reg);
 
+/// True if the shunt reading sits at the PGA limit (ADC clipped): the real current
+/// is at or above full scale and cannot be measured. (The OVF bit of the bus
+/// register only reports power/current-register math overflow, not this.)
+bool shunt_saturated(uint16_t shunt_reg, uint8_t pga);
+
 /// Current in amps from the signed shunt register.
 float decode_current(uint16_t shunt_reg, float shunt_ohm);
 

@@ -41,7 +41,7 @@ const char* Supervisor::not_ready_reason(const SupervisorInputs& in) const {
     if (!in.battery_ok) return "battery below cut-off";
     if (!in.imu_ok) return "IMU PCB not streaming frame v2 / EKF not ready";
     if (!in.axes_valid) return "motor axes not calibrated (calib axes)";
-    if (in.point_count == 0) return "no balance point stored (calib point)";
+    if (in.point_count == 0) return "no edge/vertex point for this mode (calib point / mode)";
     return "";
 }
 

@@ -114,6 +114,9 @@ size_t param_count();
 const ParamInfo& param_info(size_t i);
 /// Index of a parameter by name, or -1.
 int param_find(const char* name);
+/// True for parameters that flip a feedback sign (motor DIR / encoder inversion):
+/// they may only change while every motor is stopped and nothing balances.
+bool param_motors_off_only(int i);
 
 void params_set_defaults(Params& p);
 float param_get(const Params& p, size_t i);

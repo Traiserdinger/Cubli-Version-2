@@ -7,7 +7,7 @@
 //   any state -- latched fault --> FAULT -- "fault clear", cause gone --> IDLE
 //
 // READY means: IMU healthy (frame v2, EKF ready), battery present and above
-// cut-off, motor axes calibrated and at least one balance point stored.
+// cut-off, motor axes calibrated and at least one edge/vertex point allowed by `mode`.
 // Motors only run in ARMED_*, BENCH and CALIBRATE (axis/sysid procedures).
 #pragma once
 
@@ -64,7 +64,7 @@ struct SupervisorInputs {
     bool battery_ok = false;
     uint32_t fault_conditions = 0;  // fault:: bits currently true
     bool axes_valid = false;
-    int point_count = 0;
+    int point_count = 0;            // armable points (edge/vertex, mode filter applied)
     bool calibrating = false;       // a calibration procedure is running
     int nearest_point = -1;         // already filtered by the mode parameter
     float nearest_angle = 1e9f;

@@ -36,6 +36,17 @@ ControlStatus status() {
 
 bool motors_running() { return g_motors_live.load(); }
 
+/// Commands that would break a running controller (IMU link/EKF restart, sign
+/// changes, bulk parameter reloads) are refused while balancing, calibrating or
+/// while any motor may turn. Prints the reason; returns true if refused.
+bool refuse_while_active(Output& out, const char* what) {
+    const ControlStatus s = status();
+    const bool active = s.state == SysState::kArmedEdge || s.state == SysState::kArmedVertex ||
+                        s.state == SysState::kCalibrate || motors_running();
+    if (active) out.printf("! %s refused in %s: disarm / stop the motors first\r\n", what, cubli::sys_state_name(s.state));
+    return active;
+}
+
 const char* kind_name(cubli::PointKind k) {
     switch (k) {
         case cubli::PointKind::kEdge: return "edge";
@@ -164,6 +175,7 @@ void cmd_enc(Ctx& c, int argc, char** argv) {
 
 void cmd_imu(Ctx& c, int argc, char** argv) {
     if (argc > 1 && !std::strcmp(argv[1], "send") && argc > 2) {
+        if (refuse_while_active(c.out, "imu send")) return;
         ControlCommand cc;
         cc.cmd = Cmd::kImuSend;
         std::strncpy(cc.text, argv[2], sizeof(cc.text) - 1);
@@ -172,6 +184,7 @@ void cmd_imu(Ctx& c, int argc, char** argv) {
         return;
     }
     if (argc > 1 && !std::strcmp(argv[1], "restart")) {
+        if (refuse_while_active(c.out, "imu restart")) return;
         send_command(Cmd::kImuRestart);
         c.out.print("IMU link: searching again\r\n");
         return;
@@ -246,14 +259,15 @@ void cmd_wiretest(Ctx& c, int argc, char** argv) {
         return;
     }
     const int k = n - 1;
-    c.out.printf(
-        "WIRE TEST motor %d = schematic Motor %d = connector %s = silkscreen %s (%s edge)\r\n"
+    // Output::printf formats into 256 bytes: only the variable header goes through it.
+    c.out.printf("WIRE TEST motor %d = schematic Motor %d = connector %s = silkscreen %s (%s edge)\r\n", n, n,
+                 board::kMotorConnector[k], board::kMotorSilkscreen[k], board::kMotorBoardEdge[k]);
+    c.out.print(
         "Expected wiring (context.md 5.1): 1 red +12V, 2 black GND, 3 yellow BRAKE, 4 white PWM (inverted),\r\n"
         "  5 green DIR, 6 blue +5V encoder, 7 purple CHB, 8 grey CHA. Pin 1 = square pad.\r\n"
         "Step A (by hand, no battery needed): 'enc zero', turn the wheel exactly 10 turns, 'enc'.\r\n"
         "  Expect |count| = 4000 (400 CPR). 0 -> encoder supply/signals; ~2000 -> one channel missing.\r\n"
-        "Step B (automatic, battery, wheel free): +15%% 1 s, coast, -15%% 1 s, coast, +15%% with BRAKE on.\r\n",
-        n, n, board::kMotorConnector[k], board::kMotorSilkscreen[k], board::kMotorBoardEdge[k]);
+        "Step B (automatic, battery, wheel free): +15% 1 s, coast, -15% 1 s, coast, +15% with BRAKE on.\r\n");
     const ControlStatus s = status();
     if (s.state != SysState::kBench) {
         send_command(Cmd::kBenchOn);
@@ -291,6 +305,7 @@ void cmd_param(Ctx& c, int argc, char** argv) {
         c.out.printf("%s = %s  (default %g, range %g..%g) %s\r\n", pi.name, buf, static_cast<double>(pi.def),
                      static_cast<double>(pi.min), static_cast<double>(pi.max), pi.help);
     } else if (!std::strcmp(sub, "set") && argc > 3) {
+        if (cubli::param_motors_off_only(cubli::param_find(argv[2])) && refuse_while_active(c.out, argv[2])) return;
         const char* err = nullptr;
         g_params.update([&](cubli::Params& p) {
             err = cubli::param_set_text(p, argv[2], argv[3]);
@@ -305,12 +320,14 @@ void cmd_param(Ctx& c, int argc, char** argv) {
         }
         c.out.print(hal::nvs_save_params(g_params.get()) ? "parameters saved\r\n" : "! NVS write failed\r\n");
     } else if (!std::strcmp(sub, "reset")) {
+        if (refuse_while_active(c.out, "param reset")) return;
         g_params.update([](cubli::Params& p) {
             cubli::params_set_defaults(p);
             return true;
         });
         c.out.print("defaults loaded (not saved)\r\n");
     } else if (!std::strcmp(sub, "load")) {
+        if (refuse_while_active(c.out, "param load")) return;
         cubli::Params p;
         const int n = hal::nvs_load_params(p);
         g_params.update([&](cubli::Params& q) {
@@ -362,6 +379,7 @@ void cmd_calib(Ctx& c, int argc, char** argv) {
         send_command(Cmd::kCalibClear, all ? 1 : 0);
         c.out.print(all ? "axes and balance points cleared\r\n" : "balance points cleared\r\n");
     } else if (!std::strcmp(sub, "gyro")) {
+        if (refuse_while_active(c.out, "calib gyro")) return;
         ControlCommand cc;
         cc.cmd = Cmd::kImuSend;
         std::strncpy(cc.text, "REINIT", sizeof(cc.text) - 1);
@@ -655,12 +673,18 @@ void report_identification(Output& out) {
         static float* speed = new float[cubli::kSysIdMaxSamples];  // once, outside the control loop
         static float* cmd = new float[cubli::kSysIdMaxSamples];
         const int n = r.count;
+        // Sample spacing as recorded (1 kHz loop -> 2 ms, 500 Hz without IMU frames -> 4 ms).
+        static float* t = new float[cubli::kSysIdMaxSamples];
+        float acc = 0.0f;
+        for (int i = 0; i < n; ++i) t[i] = (acc += i > 0 ? r.samples[i].dt : 0.0f);
         for (int i = 0; i < n; ++i) {
             const int a = i > 0 ? i - 1 : 0, b = i < n - 1 ? i + 1 : n - 1;
-            speed[i] = (r.samples[b].wheel_angle[0] - r.samples[a].wheel_angle[0]) / (0.002f * static_cast<float>(b - a));
+            const float span = t[b] - t[a];
+            speed[i] = span > 0.0f ? (r.samples[b].wheel_angle[0] - r.samples[a].wheel_angle[0]) / span : 0.0f;
             cmd[i] = r.samples[i].u[0];
         }
-        const cubli::MotorIdResult m = cubli::identify_motor(speed, cmd, n, 0.002f, p.at_fc);
+        const float dt_mean = n > 1 && t[n - 1] > 0.0f ? t[n - 1] / static_cast<float>(n - 1) : 0.002f;
+        const cubli::MotorIdResult m = cubli::identify_motor(speed, cmd, n, dt_mean, p.at_fc);
         out.printf("sysid motor %d: c %.1f  kv %.5f (no-load speed at full command %.0f rad/s)  R2 %.3f  %s\r\n",
                    r.motor + 1, static_cast<double>(m.c), static_cast<double>(m.kv),
                    m.kv > 0 ? 1.0 / static_cast<double>(m.kv) : 0.0, static_cast<double>(m.r2),

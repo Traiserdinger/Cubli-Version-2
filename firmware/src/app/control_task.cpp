@@ -117,6 +117,7 @@ private:
     float wheel_speed_[3] = {0, 0, 0};
     int32_t enc_count_[3] = {0, 0, 0};
     int32_t enc_zero_[3] = {0, 0, 0};
+    int8_t enc_inv_applied_[3] = {-1, -1, -1};  // inversion the estimators were reset with
     Vec3 up_{0, 0, 1}, gyro_, accel_;
     uint8_t imu_status_ = 0;
     bool imu_ok_ = false;
@@ -340,8 +341,14 @@ void ControlLoop::handle(const ControlCommand& c) {
                 rec_target_s_ = cubli::clampf(static_cast<float>(c.i0) * 1e-3f, 0.1f, 2.5f);
             }
             break;
-        case Cmd::kImuSend: imu_->send_command(c.text); break;
-        case Cmd::kImuRestart: imu_->restart_search(); break;
+        // Last line of defence (the console refuses these too): restarting the link
+        // or sending a baud / REINIT command mid-balance would drop the IMU.
+        case Cmd::kImuSend:
+            if (!sup_.armed() && !calibrating()) imu_->send_command(c.text);
+            break;
+        case Cmd::kImuRestart:
+            if (!sup_.armed() && !calibrating()) imu_->restart_search();
+            break;
     }
 }
 
@@ -405,6 +412,9 @@ void ControlLoop::enter_armed(SysState s) {
         rec_div_ = 0;
         rec_target_s_ = 0.8f;
     }
+    // A drop request applies to this capture only: captured on a vertex (or not
+    // startable) it is cancelled, so a later edge capture (rearm) balances normally.
+    drop_pending_ = false;
 }
 
 void ControlLoop::compute_outputs(int64_t now_us, float dt, float u[3], bool& want_release) {
@@ -513,7 +523,10 @@ void ControlLoop::compute_outputs(int64_t now_us, float dt, float u[3], bool& wa
         want_release = true;
         if (procedure_ == Procedure::kAxes) {
             axis_cal_.step(dt, gyro_, u);
-            if (axis_cal_.status() == cubli::AxisCalibrator::Status::kDone) {
+            if (axis_cal_.status() == cubli::AxisCalibrator::Status::kDone && !axis_cal_.result().valid) {
+                post(Ev::kAxesFailed, axis_cal_.current_motor());  // never report success for unusable axes
+                procedure_ = Procedure::kNone;
+            } else if (axis_cal_.status() == cubli::AxisCalibrator::Status::kDone) {
                 const cubli::MotorAxes& r = axis_cal_.result();
                 for (int k = 0; k < 3; ++k) cal_.axis[k] = r.axis[k];
                 cal_.axes_valid = 1;
@@ -540,7 +553,10 @@ void ControlLoop::compute_outputs(int64_t now_us, float dt, float u[3], bool& wa
                 Recording& r = g_recording;
                 if (r.count < static_cast<int>(sizeof(r.samples) / sizeof(r.samples[0]))) {
                     cubli::SysIdSample& s = r.samples[r.count++];
-                    s.dt = 0.002f;
+                    // Real sample spacing: the loop runs at 1 kHz only while IMU
+                    // frame v2 paces it (2 ms without frames).
+                    s.dt = r.count > 1 ? static_cast<float>(now_us - last_rec_us_) * 1e-6f : 0.002f;
+                    last_rec_us_ = now_us;
                     s.wheel_angle[0] = wheel_[proc_motor_].angle(hw::kEncoderCountsPerRev);
                     s.u[0] = motors_->command(proc_motor_);
                 }
@@ -567,6 +583,9 @@ void ControlLoop::apply_outputs(const float u_in[3], bool want_release, float dt
         // keep BRAKE released (coast) while a wheel is still fast, at most coast_s.
         const float since = static_cast<float>(now - inactive_since_us_) * 1e-6f;
         release = motors_->brake_released() && max_wheel_speed() > p_.brake_rads && since < p_.coast_s;
+        // An explicit 'brake on' on the bench is an operator command, not a soft
+        // stop: brake at once instead of coasting.
+        if (sup_.state() == SysState::kBench && bench_brake_engaged_) release = false;
     }
     if (g_deadman_tripped.load()) release = false;  // the timer already braked: stay braked
 
@@ -627,7 +646,16 @@ void ControlLoop::step(int64_t now_us, bool new_frame) {
     // ---- encoders ----
     for (int k = 0; k < 3; ++k) {
         const int32_t raw = enc_->count(k);
-        enc_count_[k] = p_.enc_inv(k) > 0.5f ? -raw : raw;
+        const int8_t inv = p_.enc_inv(k) > 0.5f ? 1 : 0;
+        enc_count_[k] = inv ? -raw : raw;
+        if (inv != enc_inv_applied_[k]) {
+            // Sign convention changed (m<n>_enc_inv): the estimator window still
+            // holds counts of the old sign, re-base it instead of differentiating
+            // a jump of 2x the accumulated count (fake overspeed).
+            if (enc_inv_applied_[k] >= 0) enc_zero_[k] = -enc_zero_[k];
+            enc_inv_applied_[k] = inv;
+            wheel_[k].reset(enc_count_[k], static_cast<uint32_t>(now_us));
+        }
         wheel_speed_[k] = wheel_[k].update(enc_count_[k], static_cast<uint32_t>(now_us), static_cast<int>(p_.wheel_win),
                                            p_.wheel_fc, hw::kEncoderCountsPerRev);
     }
@@ -675,7 +703,7 @@ void ControlLoop::step(int64_t now_us, bool new_frame) {
     if (numeric_fault_) cond |= cubli::fault::kNumeric;
     sin_.fault_conditions = cond;
     sin_.axes_valid = axes_.valid;
-    sin_.point_count = cal_.point_count();
+    sin_.point_count = cubli::armable_point_count(cal_, static_cast<int>(p_.mode));
     sin_.calibrating = calibrating();
     float ang = 1e9f;
     const int near = imu_ok_ ? cubli::find_nearest_point(cal_, up_, static_cast<int>(p_.mode), &ang) : -1;

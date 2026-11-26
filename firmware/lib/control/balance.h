@@ -23,6 +23,9 @@
 namespace cubli {
 
 inline constexpr int kMotors = 3;
+/// Largest |cos| between two motor axes that is accepted as "orthogonal enough"
+/// (69.5 deg). One value for the axis calibration and every later validation.
+inline constexpr float kAxesMaxCos = 0.35f;
 
 struct MotorAxes {
     Vec3 axis[kMotors] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
@@ -31,7 +34,7 @@ struct MotorAxes {
 
     /// Normalises the axes and computes the mixing inverse. Requires the axes to be
     /// close to orthogonal (|cos| < max_cos between any pair).
-    bool finalize(float max_cos = 0.3f);
+    bool finalize(float max_cos = kAxesMaxCos);
 };
 
 struct AxisGains {

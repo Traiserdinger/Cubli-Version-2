@@ -22,6 +22,7 @@ private:
     void* dev_ = nullptr;
     bool present_ = false;
     float shunt_ohm_ = 0.05f;
+    uint8_t pga_ = 3;
 };
 
 }  // namespace hal
